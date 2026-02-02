@@ -1,23 +1,20 @@
-from datasets.fingerprint import xxhash
-from xtuner.v1.data_proto import SequenceContext
-from xtuner.v1.datasets.collator import build_text_ctx_labels
-from xtuner.v1.data_proto.messages import ChatMessages
-from pathlib import Path
-from xtuner.v1.utils.logger import logger
-from xtuner.v1.datasets import CachableTokenizeFunction
-from pydantic import BaseModel
 import copy
 import os
-
-from xtuner.v1.datasets.utils import tokenizer_xxhash
-
+from pathlib import Path
 
 import torch
+from datasets.fingerprint import xxhash
+from pydantic import BaseModel
+from xtuner.v1.data_proto import SequenceContext
+from xtuner.v1.data_proto.messages import ChatMessages
+from xtuner.v1.datasets import CachableTokenizeFunction
+from xtuner.v1.datasets.collator import build_text_ctx_labels
+from xtuner.v1.datasets.utils import tokenizer_xxhash
+from xtuner.v1.utils.logger import logger
+
 from transformers import PreTrainedTokenizer
 
-
-from xtuner.v1.datasets.utils import CachableTokenizeFunction
-from .constant import TS_CONTEXT, TS_TOKEN_ALIAS, TS_BOS, TS_EOS
+from .constant import TS_BOS, TS_CONTEXT, TS_EOS, TS_TOKEN_ALIAS
 
 
 class TimeSeriesSequenceContext(SequenceContext):
@@ -68,9 +65,7 @@ def ts_sft_collator(
             pack_to_max_length=pack_to_max_length,
         )
 
-        ts_values = [
-            i["time_series_signals"] for i in instance if "time_series_signals" in i
-        ]
+        ts_values = [i["time_series_signals"] for i in instance if "time_series_signals" in i]
         ts_lens = [i["ts_len"] for i in instance if "ts_len" in i]
         ts_sr = [i["ts_sr"] for i in instance if "ts_sr" in i]
 
@@ -149,24 +144,18 @@ class TimeSeriesTokenizeFunction(CachableTokenizeFunction):
         if self._hash is None:
             # truncate to 16 characters prevent too long cache directory
             _tokenizer_hash = tokenizer_xxhash(self.tokenizer)[:16]
-            ts_token_hash = xxhash.xxh64(
-                (TS_BOS + TS_CONTEXT + TS_EOS).encode()
-            ).hexdigest()[:16]
+            ts_token_hash = xxhash.xxh64((TS_BOS + TS_CONTEXT + TS_EOS).encode()).hexdigest()[:16]
             self._hash = f"{_tokenizer_hash}_{ts_token_hash}"
 
         return self._hash
 
     def calc_num_tokens_time_series_get_item(self, data_item) -> dict:
-        _time_series_path, time_series_extra_info = (
-            self.collect_time_series_paths_and_extra(data_item["messages"])
-        )
+        _time_series_path, time_series_extra_info = self.collect_time_series_paths_and_extra(data_item["messages"])
         _time_series_path = [f"{self.media_root}/{item}" for item in _time_series_path]
         _time_series_sampling_rate = time_series_extra_info["sampling_rate"]
 
         transform = self.build_ts_transform()
-        _, ts_len, sampling_rate = transform(
-            _time_series_path, _time_series_sampling_rate
-        )
+        _, ts_len, sampling_rate = transform(_time_series_path, _time_series_sampling_rate)
 
         stride = torch.floor(160 / ((1 + torch.exp(-sampling_rate / 100)) ** 6))
         patch_size = stride * 2
@@ -180,14 +169,12 @@ class TimeSeriesTokenizeFunction(CachableTokenizeFunction):
             TS_CONTEXT,
             TS_EOS,
         )
-        input_ids, _ = self.naive_apply_chat_template(
-            data_item["messages"], self.tokenizer
-        )
+        input_ids, _ = self.naive_apply_chat_template(data_item["messages"], self.tokenizer)
 
         input_ids, _ = self._truncated_input_and_labels(input_ids)
-        assert (
-            torch.tensor(input_ids) == self.ts_context_token_id
-        ).sum() == num_ts_tokens, "ERROR: ts tokens are truncated"
+        assert (torch.tensor(input_ids) == self.ts_context_token_id).sum() == num_ts_tokens, (
+            "ERROR: ts tokens are truncated"
+        )
         return {"num_tokens": len(input_ids)}
 
     def time_series_get_item(self, data_item) -> dict:
@@ -196,17 +183,13 @@ class TimeSeriesTokenizeFunction(CachableTokenizeFunction):
         # ts_values = ts_out["ts_values"]
         # ts_len = ts_out["ts_lens"]
         # sampling_rate = ts_out["sampling_rate"]
-        _time_series_path, time_series_extra_info = (
-            self.collect_time_series_paths_and_extra(data_item["messages"])
-        )
+        _time_series_path, time_series_extra_info = self.collect_time_series_paths_and_extra(data_item["messages"])
         _time_series_path = [f"{self.media_root}/{item}" for item in _time_series_path]
         _time_series_sampling_rate = time_series_extra_info["sampling_rate"]
 
         transform = self.build_ts_transform()
 
-        ts_values, ts_len, sampling_rate = transform(
-            _time_series_path, _time_series_sampling_rate
-        )
+        ts_values, ts_len, sampling_rate = transform(_time_series_path, _time_series_sampling_rate)
 
         stride = torch.floor(160 / ((1 + torch.exp(-sampling_rate / 100)) ** 6))
         patch_size = stride * 2
@@ -221,14 +204,12 @@ class TimeSeriesTokenizeFunction(CachableTokenizeFunction):
             TS_CONTEXT,
             TS_EOS,
         )
-        input_ids, labels = self.naive_apply_chat_template(
-            data_item["messages"], self.tokenizer
-        )
+        input_ids, labels = self.naive_apply_chat_template(data_item["messages"], self.tokenizer)
 
         input_ids, labels = self._truncated_input_and_labels(input_ids, labels)
-        assert (
-            torch.tensor(input_ids) == self.ts_context_token_id
-        ).sum() == num_ts_tokens, "ERROR: ts tokens are truncated"
+        assert (torch.tensor(input_ids) == self.ts_context_token_id).sum() == num_ts_tokens, (
+            "ERROR: ts tokens are truncated"
+        )
 
         ret = dict(
             input_ids=input_ids,
@@ -244,16 +225,12 @@ class TimeSeriesTokenizeFunction(CachableTokenizeFunction):
         return ret
 
     def pure_text_get_item(self, data_item: dict) -> dict:
-        messages = ChatMessages(
-            messages=data_item["messages"], tools=data_item.get("tools")
-        )
+        messages = ChatMessages(messages=data_item["messages"], tools=data_item.get("tools"))
 
         is_pretrain = False
         if len(messages.messages) == 1 and messages.messages[0].role == "pretrain":
             is_pretrain = True
-        assert is_pretrain is False, (
-            "Text pretrain data should not be processed by this function"
-        )
+        assert is_pretrain is False, "Text pretrain data should not be processed by this function"
 
         tokenized = messages.tokenize(self.tokenizer, self.chat_template)
         input_ids = tokenized["input_ids"]
@@ -277,9 +254,7 @@ class TimeSeriesTokenizeFunction(CachableTokenizeFunction):
     ):
         for msg in messages["messages"]:
             if msg["role"] == "pretrain":
-                assert len(messages["messages"]) == 1, (
-                    "pretrain message should only have one message"
-                )
+                assert len(messages["messages"]) == 1, "pretrain message should only have one message"
             if msg["role"] == "user" or msg["role"] == "pretrain":
                 content = msg["content"]
                 if isinstance(content, list):
@@ -296,9 +271,7 @@ class TimeSeriesTokenizeFunction(CachableTokenizeFunction):
             if msg["role"] == "assistant":
                 msg["content"] = "<think></think>\n\n" + msg["content"]
 
-    def naive_apply_chat_template(
-        self, messages: list[dict], tokenizer: PreTrainedTokenizer
-    ):
+    def naive_apply_chat_template(self, messages: list[dict], tokenizer: PreTrainedTokenizer):
         labels = []
         input_ids = []
 
@@ -332,13 +305,7 @@ class TimeSeriesTokenizeFunction(CachableTokenizeFunction):
 
         def process_single_turn(content: str | list[dict], role: str):
             if isinstance(content, list):
-                input_ids, labels = zip(
-                    *(
-                        _tokenize_single_content(i["text"], role)
-                        for i in content
-                        if "text" in i
-                    )
-                )
+                input_ids, labels = zip(*(_tokenize_single_content(i["text"], role) for i in content if "text" in i))
                 input_ids = sum(input_ids, [])
                 labels = sum(labels, [])
             else:
@@ -346,20 +313,13 @@ class TimeSeriesTokenizeFunction(CachableTokenizeFunction):
 
             return input_ids, labels
 
-        input_ids, labels = zip(
-            *(
-                process_single_turn(message["content"], message["role"])
-                for message in messages
-            )
-        )
+        input_ids, labels = zip(*(process_single_turn(message["content"], message["role"]) for message in messages))
         input_ids = sum(input_ids, [])
         labels = sum(labels, [])
 
         return input_ids, labels
 
-    def _truncated_input_and_labels(
-        self, input_ids, labels: torch.Tensor | None = None
-    ):
+    def _truncated_input_and_labels(self, input_ids, labels: torch.Tensor | None = None):
         if self.max_length is not None and len(input_ids) > self.max_length:
             logger.info(
                 f"WARNING: input_ids length {len(input_ids)} exceeds model_max_length {self.max_length}. truncated!"
@@ -403,9 +363,7 @@ class TimeSeriesTokenizeFunction(CachableTokenizeFunction):
                     try:
                         import librosa
                     except ImportError:
-                        raise ImportError(
-                            "Please install librosa to process audio files."
-                        )
+                        raise ImportError("Please install librosa to process audio files.")
                     ts_input, sr = librosa.load(ts_path, sr=None)
                     ts_input = ts_input[:, None]  # [T, 1]
                 elif ext == ".csv":
